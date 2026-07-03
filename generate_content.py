@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Content generator: read crawled HTML for a set of businesses, extract
 structured data page-by-page (so no page's content is ever truncated away).
-Writes one JSON per page (raw extraction, results/<domain>/<page>.json) plus
-one merged/consolidated record per business (results/<domain>/_merged.json),
-so the merge step can be re-run later from saved per-page data without
-re-paying for LLM calls. Run against HTML_DIR (default test_html/) for
+Writes one JSON per page — raw extraction, results/<domain>/<page>.json —
+and nothing else. This is the only part of the pipeline that needs ollama/the
+GH Actions runner; merging pages into one record per business is pure local
+logic with no LLM involved, so it deliberately does NOT happen here — run
+merge_results.py separately afterward (locally or in a follow-up job) on the
+downloaded results/ folder. Run against HTML_DIR (default test_html/) for
 validation before this gets wired into a batched GH Actions matrix workflow
 like the crawler."""
 import json
@@ -14,7 +16,6 @@ import time
 import urllib.request
 
 from clean_html import clean_html, should_skip_page
-from merge_json import merge_page_results
 
 HTML_DIR = os.environ.get("HTML_DIR", "test_html")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "results")
@@ -23,20 +24,6 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MAX_PAGE_CHARS = 6000  # per-page cap (matches clean_html's own default)
 PROMPT_FILE = os.environ.get("PROMPT_FILE", "prompt.txt")
-
-# Pages most likely to hold reliable contact/services info are processed
-# first — doesn't affect correctness (every page is processed regardless)
-# but the merge step's "first non-null wins" logic means priority pages
-# should win ties for scalar fields like address/phone.
-PAGE_PRIORITY_KEYWORDS = ["contact", "about", "location", "service", "team", "insurance"]
-
-
-def page_priority(filename: str) -> int:
-    lower = filename.lower()
-    for i, kw in enumerate(PAGE_PRIORITY_KEYWORDS):
-        if kw in lower:
-            return i
-    return len(PAGE_PRIORITY_KEYWORDS)  # everything else (incl. homepage) goes last
 
 
 def load_prompt_template() -> str:
@@ -65,17 +52,15 @@ def parse_json_response(raw: str) -> dict:
     return json.loads(match.group(0))
 
 
-def process_business(domain: str, business_dir: str, business_out_dir: str, prompt_template: str) -> dict:
-    """Writes one JSON file per page (raw extraction, as soon as it's produced —
-    survives a mid-business crash) plus one _merged.json with the consolidated
-    result, all under results/<domain>/. Returns the merged dict."""
+def process_business(business_dir: str, business_out_dir: str, prompt_template: str) -> tuple[int, int, list]:
+    """Writes one JSON file per page as soon as it's produced (survives a
+    mid-business crash). Returns (pages_processed, pages_succeeded, page_errors)."""
     filenames = sorted(
-        (f for f in os.listdir(business_dir) if f.endswith(".html") and not should_skip_page(f)),
-        key=page_priority,
+        f for f in os.listdir(business_dir) if f.endswith(".html") and not should_skip_page(f)
     )
     os.makedirs(business_out_dir, exist_ok=True)
 
-    page_results = []
+    succeeded = 0
     page_errors = []
     for filename in filenames:
         path = os.path.join(business_dir, filename)
@@ -89,22 +74,15 @@ def process_business(domain: str, business_dir: str, business_out_dir: str, prom
         try:
             raw = call_ollama(prompt)
             parsed = parse_json_response(raw)
-            page_results.append(parsed)
 
             page_out_path = os.path.join(business_out_dir, filename.replace(".html", ".json"))
             with open(page_out_path, "w", encoding="utf-8") as f:
                 json.dump(parsed, f, indent=2, ensure_ascii=False)
+            succeeded += 1
         except Exception as err:
             page_errors.append(f"{filename}: {err}")
 
-    if not page_results:
-        raise ValueError(f"no page succeeded ({len(page_errors)} page errors: {page_errors[:3]})")
-
-    merged = merge_page_results(page_results)
-    merged["_pages_processed"] = len(filenames)
-    merged["_pages_succeeded"] = len(page_results)
-    merged["_page_errors"] = page_errors
-    return merged
+    return len(filenames), succeeded, page_errors
 
 
 def main():
@@ -123,26 +101,18 @@ def main():
         print(f"\n=== {domain} ===")
         start = time.time()
         try:
-            merged = process_business(domain, business_dir, business_out_dir, prompt_template)
+            processed, succeeded, page_errors = process_business(business_dir, business_out_dir, prompt_template)
             elapsed = time.time() - start
-            print(
-                f"  done in {elapsed:.1f}s — "
-                f"{merged['_pages_succeeded']}/{merged['_pages_processed']} pages ok, "
-                f"{len(merged['services'])} services, {len(merged['dentists'])} dentists, "
-                f"{len(merged['insurance_plans'])} insurance plans"
-            )
-            merged["_seconds"] = round(elapsed, 1)
-
-            out_path = os.path.join(business_out_dir, "_merged.json")
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(merged, f, indent=2, ensure_ascii=False)
+            if succeeded == 0:
+                raise ValueError(f"no page succeeded ({len(page_errors)} page errors: {page_errors[:3]})")
+            print(f"  done in {elapsed:.1f}s — {succeeded}/{processed} pages ok")
         except Exception as err:
             elapsed = time.time() - start
             print(f"  FAILED after {elapsed:.1f}s: {err}")
             with open(FAILURES_TXT, "a", encoding="utf-8") as f:
                 f.write(domain + "\n")
 
-    print(f"\nWrote results to {OUTPUT_DIR}/")
+    print(f"\nWrote per-page results to {OUTPUT_DIR}/ — run merge_results.py separately to consolidate.")
 
 
 if __name__ == "__main__":
