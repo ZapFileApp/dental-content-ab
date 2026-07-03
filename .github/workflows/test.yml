@@ -1,0 +1,46 @@
+name: Test Content Generation (3 businesses)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start Ollama server
+        run: |
+          ollama serve &
+          sleep 5
+
+      - name: Cache Ollama model
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-llama3.2-3b
+
+      - name: Pull model
+        run: ollama pull llama3.2:3b
+
+      - name: Generate descriptions
+        run: python generate_content.py
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: descriptions
+          path: |
+            descriptions.csv
+            failures.txt
+          if-no-files-found: ignore
