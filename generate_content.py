@@ -20,10 +20,15 @@ from clean_html import clean_html, should_skip_page
 HTML_DIR = os.environ.get("HTML_DIR", "test_html")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "results")
 FAILURES_TXT = os.environ.get("FAILURES_TXT", "failures.txt")
+PAGE_FAILURES_TXT = os.environ.get("PAGE_FAILURES_TXT", "page_failures.txt")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MAX_PAGE_CHARS = 6000  # per-page cap (matches clean_html's own default)
 PROMPT_FILE = os.environ.get("PROMPT_FILE", "prompt.txt")
+MAX_ATTEMPTS = 3  # retries for transient ollama errors AND for a page that
+                   # comes back as unparseable JSON (generation isn't
+                   # deterministic, a retry can succeed where the first try didn't)
+RETRY_DELAY_SECONDS = 5
 
 
 def load_prompt_template() -> str:
@@ -52,9 +57,26 @@ def parse_json_response(raw: str) -> dict:
     return json.loads(match.group(0))
 
 
+def extract_page(prompt: str) -> dict:
+    """Calls ollama and parses its response, retrying on any failure (network
+    hiccup, malformed JSON, etc.) up to MAX_ATTEMPTS times before giving up."""
+    last_err = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            raw = call_ollama(prompt)
+            return parse_json_response(raw)
+        except Exception as err:
+            last_err = err
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(RETRY_DELAY_SECONDS)
+    raise last_err
+
+
 def process_business(business_dir: str, business_out_dir: str, prompt_template: str) -> tuple[int, int, list]:
     """Writes one JSON file per page as soon as it's produced (survives a
-    mid-business crash). Returns (pages_processed, pages_succeeded, page_errors)."""
+    mid-business crash). Returns (pages_processed, pages_succeeded, page_errors)
+    where page_errors is a list of (filename, error_message, attempts) for
+    every page that failed even after retries."""
     filenames = sorted(
         f for f in os.listdir(business_dir) if f.endswith(".html") and not should_skip_page(f)
     )
@@ -72,15 +94,13 @@ def process_business(business_dir: str, business_out_dir: str, prompt_template: 
 
         prompt = prompt_template.format(content=cleaned)
         try:
-            raw = call_ollama(prompt)
-            parsed = parse_json_response(raw)
-
+            parsed = extract_page(prompt)
             page_out_path = os.path.join(business_out_dir, filename.replace(".html", ".json"))
             with open(page_out_path, "w", encoding="utf-8") as f:
                 json.dump(parsed, f, indent=2, ensure_ascii=False)
             succeeded += 1
         except Exception as err:
-            page_errors.append(f"{filename}: {err}")
+            page_errors.append((filename, str(err)))
 
     return len(filenames), succeeded, page_errors
 
@@ -100,17 +120,22 @@ def main():
         business_out_dir = os.path.join(OUTPUT_DIR, domain)
         print(f"\n=== {domain} ===")
         start = time.time()
-        try:
-            processed, succeeded, page_errors = process_business(business_dir, business_out_dir, prompt_template)
-            elapsed = time.time() - start
-            if succeeded == 0:
-                raise ValueError(f"no page succeeded ({len(page_errors)} page errors: {page_errors[:3]})")
-            print(f"  done in {elapsed:.1f}s — {succeeded}/{processed} pages ok")
-        except Exception as err:
-            elapsed = time.time() - start
-            print(f"  FAILED after {elapsed:.1f}s: {err}")
+
+        processed, succeeded, page_errors = process_business(business_dir, business_out_dir, prompt_template)
+        elapsed = time.time() - start
+
+        # every page failure gets logged, whether or not the business overall succeeded
+        for filename, err_msg in page_errors:
+            print(f"  page FAILED (after {MAX_ATTEMPTS} attempts): {filename}: {err_msg}")
+            with open(PAGE_FAILURES_TXT, "a", encoding="utf-8") as f:
+                f.write(f"{domain}/{filename}\t{err_msg}\n")
+
+        if succeeded == 0:
+            print(f"  BUSINESS FAILED after {elapsed:.1f}s — no page succeeded")
             with open(FAILURES_TXT, "a", encoding="utf-8") as f:
                 f.write(domain + "\n")
+        else:
+            print(f"  done in {elapsed:.1f}s — {succeeded}/{processed} pages ok")
 
     print(f"\nWrote per-page results to {OUTPUT_DIR}/ — run merge_results.py separately to consolidate.")
 
