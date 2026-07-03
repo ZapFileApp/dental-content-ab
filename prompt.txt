@@ -1,0 +1,39 @@
+You are extracting structured directory data for a dental practice, based only on the website content below. Do not invent, guess, or infer any detail that is not explicitly present in the content. If a field is not found, use null (or an empty array for list fields).
+
+Return ONLY valid JSON, with no markdown code fences, no commentary, and no text before or after the JSON. Use exactly this schema:
+
+{{
+  "clinic_name": string or null,
+  "clinic_desc": text atleast 3 sentences
+  "address": string or null,
+  "city": string or null,
+  "postcode": string or null,
+  "phone": string or null,
+  "State": string or null,
+  "services": [  // list every service
+    {{
+      "name": string,
+      "description": text  must be 2 sentenses 
+    }}
+  ],
+  "dentists": [
+    {{
+      "name": string,
+      "education": string or null,
+      "speciality": string or null,
+      "other_info": text or null
+    }}
+  ],
+  "insurance_plans": [string]
+}}
+
+Rules:
+- "services": list every distinct dental service/treatment mentioned. Each "description" must be a short (one sentence) factual summary of that service, written using only what the content says about it — not a generic definition.
+- "dentists": list every named dentist/doctor found in the content, with whatever education, speciality, and other biographical info is actually stated. If a dentist is named but no other details are given, leave those fields null.
+- "insurance_plans": list every named insurance provider or plan mentioned (e.g. Sun Life, Manulife, Canada Dental Care Plan). Do not include generic phrases like "we accept most insurance" as a plan name.
+- If the content contains no information for an entire section (e.g. no dentists named), return an empty array for that field rather than omitting the key.
+
+WEBSITE CONTENT:
+{content}
+
+JSON:

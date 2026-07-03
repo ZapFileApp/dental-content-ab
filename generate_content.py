@@ -19,15 +19,12 @@ FAILURES_TXT = os.environ.get("FAILURES_TXT", "failures.txt")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MAX_TOTAL_CHARS = 8000  # hard cap on combined cleaned text sent to the model
+PROMPT_FILE = os.environ.get("PROMPT_FILE", "prompt.txt")
 
-PROMPT_TEMPLATE = """You are writing a short, factual directory listing description for a dental practice, based only on the website content below. Do not invent details that aren't present in the content.
 
-Write 2-3 sentences covering what the practice offers and anything notable (location, specialties, patient focus). Plain text only, no markdown.
-
-WEBSITE CONTENT:
-{content}
-
-DESCRIPTION:"""
+def load_prompt_template() -> str:
+    with open(PROMPT_FILE, encoding="utf-8") as f:
+        return f.read()
 
 
 def gather_business_text(business_dir: str) -> str:
@@ -72,6 +69,7 @@ def main():
     )
     print(f"Found {len(businesses)} businesses in {HTML_DIR}")
 
+    prompt_template = load_prompt_template()
     rows = []
     for domain in businesses:
         business_dir = os.path.join(HTML_DIR, domain)
@@ -82,7 +80,7 @@ def main():
             if not content:
                 raise ValueError("no usable content after filtering/cleaning")
 
-            prompt = PROMPT_TEMPLATE.format(content=content)
+            prompt = prompt_template.format(content=content)
             print(f"  prompt length: {len(prompt)} chars")
 
             description = call_ollama(prompt)
