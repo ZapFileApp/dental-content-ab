@@ -33,14 +33,14 @@ jobs:
       - name: Pull model
         run: ollama pull llama3.2:3b
 
-      - name: Generate descriptions
+      - name: Generate content
         run: python generate_content.py
 
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
-          name: descriptions
+          name: results
           path: |
-            descriptions.csv
+            results/
             failures.txt
           if-no-files-found: ignore
