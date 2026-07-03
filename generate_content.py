@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Content generator: read crawled HTML for a set of businesses, extract
-structured data page-by-page (so no page's content is ever truncated away),
-then merge the per-page results locally into one consolidated record per
-business. Run against HTML_DIR (default test_html/) for validation before
-this gets wired into a batched GH Actions matrix workflow like the crawler."""
+structured data page-by-page (so no page's content is ever truncated away).
+Writes one JSON per page (raw extraction, results/<domain>/<page>.json) plus
+one merged/consolidated record per business (results/<domain>/_merged.json),
+so the merge step can be re-run later from saved per-page data without
+re-paying for LLM calls. Run against HTML_DIR (default test_html/) for
+validation before this gets wired into a batched GH Actions matrix workflow
+like the crawler."""
 import json
 import os
 import re
@@ -62,11 +65,15 @@ def parse_json_response(raw: str) -> dict:
     return json.loads(match.group(0))
 
 
-def process_business(domain: str, business_dir: str, prompt_template: str) -> dict:
+def process_business(domain: str, business_dir: str, business_out_dir: str, prompt_template: str) -> dict:
+    """Writes one JSON file per page (raw extraction, as soon as it's produced —
+    survives a mid-business crash) plus one _merged.json with the consolidated
+    result, all under results/<domain>/. Returns the merged dict."""
     filenames = sorted(
         (f for f in os.listdir(business_dir) if f.endswith(".html") and not should_skip_page(f)),
         key=page_priority,
     )
+    os.makedirs(business_out_dir, exist_ok=True)
 
     page_results = []
     page_errors = []
@@ -83,6 +90,10 @@ def process_business(domain: str, business_dir: str, prompt_template: str) -> di
             raw = call_ollama(prompt)
             parsed = parse_json_response(raw)
             page_results.append(parsed)
+
+            page_out_path = os.path.join(business_out_dir, filename.replace(".html", ".json"))
+            with open(page_out_path, "w", encoding="utf-8") as f:
+                json.dump(parsed, f, indent=2, ensure_ascii=False)
         except Exception as err:
             page_errors.append(f"{filename}: {err}")
 
@@ -108,10 +119,11 @@ def main():
 
     for domain in businesses:
         business_dir = os.path.join(HTML_DIR, domain)
+        business_out_dir = os.path.join(OUTPUT_DIR, domain)
         print(f"\n=== {domain} ===")
         start = time.time()
         try:
-            merged = process_business(domain, business_dir, prompt_template)
+            merged = process_business(domain, business_dir, business_out_dir, prompt_template)
             elapsed = time.time() - start
             print(
                 f"  done in {elapsed:.1f}s — "
@@ -121,7 +133,7 @@ def main():
             )
             merged["_seconds"] = round(elapsed, 1)
 
-            out_path = os.path.join(OUTPUT_DIR, f"{domain}.json")
+            out_path = os.path.join(business_out_dir, "_merged.json")
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(merged, f, indent=2, ensure_ascii=False)
         except Exception as err:
