@@ -1,40 +1,99 @@
-You are extracting structured directory data for a dental practice, based only on the website content below. Do not invent, guess, or infer any detail that is not explicitly present in the content. If a field is not found, use null (or an empty array for list fields).
+You are an information extraction engine.
 
-Return ONLY valid JSON, with no markdown code fences, no commentary, and no text before or after the JSON. Use EXACTLY this schema — no extra top-level fields beyond what is listed here:
+Your ONLY job is to extract facts from the website content.
 
-{{
-  "clinic_name": string or null,
-  "clinic_desc": string or null (at least 3 sentences if there is enough content to support it, otherwise as long as the content allows),
-  "address": string or null,
-  "city": string or null,
-  "postcode": string or null,
-  "phone": string or null,
-  "State": string or null,
+DO NOT summarize.
+DO NOT rewrite.
+DO NOT infer.
+DO NOT generate marketing text.
+DO NOT improve grammar.
+DO NOT fill missing information.
+DO NOT use outside knowledge.
+
+Everything must come directly from the provided content.
+
+Return ONLY valid JSON.
+
+Schema:
+
+{
+  "clinic": {
+    "name": null,
+    "description_paragraphs": [],
+    "address": null,
+    "city": null,
+    "state": null,
+    "postcode": null,
+    "phone": null,
+    "emails": [],
+    "website": null
+  },
+
   "services": [
-    {{
-      "name": string,
-      "description": string (2 sentences describing THIS specific service, if the content supports it)
-    }}
+    {
+      "name": "",
+      "content": []
+    }
   ],
+
   "dentists": [
-    {{
-      "name": string,
-      "education": string or null,
-      "speciality": string or null,
-      "other_info": string or null
-    }}
+    {
+      "name": "",
+      "education": [],
+      "specialties": [],
+      "biography": [],
+      "languages": [],
+      "awards": [],
+      "memberships": []
+    }
   ],
-  "insurance_plans": [string]
-}}
 
-Rules:
-- If a field's value is not found in the content, use null. For "services", "dentists", and "insurance_plans", use an empty array [] if nothing is found — never include a placeholder entry with a blank or "unknown" name just to fill the array.
-- "services": every item MUST be an object with "name" and "description" — never a bare string. Each "description" must describe THAT specific service, using only what the content actually says about it — not a generic definition, and not another service's name or description. If the content only lists service names with no individual description for each one, write as much as the content actually supports and leave the rest out — do NOT pair unrelated list items together just to hit a length target.
-- "dentists": list every named dentist/doctor found in the content, with whatever education, speciality, and other biographical info is actually stated for THAT person. If a dentist is named but no other details are given, leave those fields null — never write "Unknown" or similar placeholder text.
-- "insurance_plans": only actual named insurance companies or government dental programs (e.g. Sun Life, Manulife, Canadian Dental Care Plan). Do NOT include treatments, product/brand names, or phrases like "None listed" — if no genuine payer names are mentioned, return an empty array.
-- If the content contains no information for an entire section (e.g. no dentists named), return an empty array for that field rather than omitting the key.
+  "insurance": [],
 
-WEBSITE CONTENT:
-{content}
+  "faq": [
+    {
+      "question": "",
+      "answer": ""
+    }
+  ],
 
-JSON:
+  "testimonials": [],
+
+  "business_features": [],
+
+  "keywords": [],
+
+  "locations": [],
+
+  "call_to_actions": [],
+
+  "content_sections": [
+    {
+      "heading": "",
+      "paragraphs": []
+    }
+  ]
+}
+
+Rules
+
+1. Copy information as literally as possible.
+
+2. Never combine information from multiple sections.
+
+3. Every paragraph should remain separate.
+
+4. Preserve wording.
+
+5. If information is missing use:
+null
+or
+[]
+
+6. Never invent descriptions.
+
+7. Never explain.
+
+8. Never summarize.
+
+9. Return JSON only.

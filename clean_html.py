@@ -11,6 +11,12 @@ SKIP_PATH_KEYWORDS = [
 
 NOISE_TAGS = ["script", "style", "nav", "footer", "header", "noscript", "svg", "form"]
 
+# Trademark-type symbols add no factual value for a directory listing and
+# reliably trip up small models trying to JSON-escape them correctly when
+# they appear repeatedly (e.g. "BOTOX®" mentioned many times on one page) —
+# strip them rather than fight the model's JSON output every time.
+TRADEMARK_SYMBOLS = {"®": "", "™": "", "©": ""}  # ® ™ ©
+
 
 def should_skip_page(filename: str) -> bool:
     lower = filename.lower()
@@ -23,6 +29,8 @@ def clean_html(html: str, max_chars: int = 6000) -> str:
         tag.decompose()
 
     text = soup.get_text(separator=" ", strip=True)
+    for symbol, replacement in TRADEMARK_SYMBOLS.items():
+        text = text.replace(symbol, replacement)
     # collapse repeated whitespace
     text = " ".join(text.split())
     return text[:max_chars]
