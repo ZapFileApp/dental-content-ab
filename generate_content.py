@@ -36,6 +36,13 @@ def load_prompt_template() -> str:
         return f.read()
 
 
+def build_prompt(prompt_template: str, content: str) -> str:
+    """Appends the page content after the prompt instructions/schema — does
+    NOT use str.format(), since prompt.txt is free to contain literal JSON
+    schema braces without needing to escape them as {{ }}."""
+    return f"{prompt_template}\n\nWEBSITE CONTENT:\n{content}\n\nJSON:"
+
+
 def call_ollama(prompt: str) -> str:
     payload = json.dumps({
         "model": OLLAMA_MODEL,
@@ -92,7 +99,7 @@ def process_business(business_dir: str, business_out_dir: str, prompt_template: 
         if not cleaned:
             continue
 
-        prompt = prompt_template.format(content=cleaned)
+        prompt = build_prompt(prompt_template, cleaned)
         try:
             parsed = extract_page(prompt)
             page_out_path = os.path.join(business_out_dir, filename.replace(".html", ".json"))
