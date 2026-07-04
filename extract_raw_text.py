@@ -6,6 +6,7 @@ plain-text file per page to results_text/<domain>/<page>.txt, preserving the
 page's natural reading order (BeautifulSoup's get_text() walks the DOM
 top-to-bottom, so this is already "sequential" without extra work)."""
 import os
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -24,8 +25,29 @@ def reconstruct_url(filename: str) -> str:
     return f"https://{stem.replace('_', '/')}"
 
 
-def raw_text(html: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
+def extract_links(soup: BeautifulSoup, base_url: str) -> list[tuple[str, str]]:
+    """Pulls every link from the WHOLE page — including nav/footer/header,
+    which is exactly where "Book Appointment" / "Contact Us" buttons usually
+    live and which raw_text() strips out as chrome. Order preserved as found
+    in the document. Resolves relative hrefs (e.g. "/contact") to absolute
+    URLs using this page's own URL as the base."""
+    links = []
+    seen = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        text = a.get_text(strip=True)
+        if not href or href.startswith("javascript:") or href == "#":
+            continue
+        absolute = urljoin(base_url, href)
+        key = (text, absolute)
+        if key in seen:
+            continue
+        seen.add(key)
+        links.append(key)
+    return links
+
+
+def raw_text(soup: BeautifulSoup) -> str:
     for tag in soup(NOISE_TAGS):
         tag.decompose()
     # keep natural line breaks between block-level chunks instead of
@@ -55,14 +77,18 @@ def main():
             path = os.path.join(business_dir, filename)
             with open(path, encoding="utf-8", errors="ignore") as f:
                 html = f.read()
-            text = raw_text(html)
-            if not text:
-                continue
 
             url = reconstruct_url(filename)
+            soup = BeautifulSoup(html, "html.parser")
+            links = extract_links(soup, url)  # must run BEFORE raw_text() strips nav/footer/header
+            text = raw_text(soup)
+            if not text and not links:
+                continue
+
+            links_block = "\n".join(f"{link_text or '(no text)'} -> {href}" for link_text, href in links)
             out_path = os.path.join(business_out_dir, filename.replace(".html", ".txt"))
             with open(out_path, "w", encoding="utf-8") as f:
-                f.write(f"URL: {url}\n\n{text}")
+                f.write(f"URL: {url}\n\nLINKS:\n{links_block}\n\nTEXT:\n{text}")
             total_pages += 1
 
         print(f"  {domain}: {len(filenames)} pages")
