@@ -15,6 +15,15 @@ HTML_DIR = os.environ.get("HTML_DIR", "test_html")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "results_text")
 
 
+def reconstruct_url(filename: str) -> str:
+    """Best-effort reversal of the crawler's sanitizeFilename() (in scrape.js):
+    it replaced the scheme and every /:?&=# character with "_", so this is
+    lossy — cannot tell an original "/" apart from a "?" or "&" etc. Good
+    enough for simple paths (most pages here), not exact for query strings."""
+    stem = filename[:-len(".html")] if filename.endswith(".html") else filename
+    return f"https://{stem.replace('_', '/')}"
+
+
 def raw_text(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(NOISE_TAGS):
@@ -50,9 +59,10 @@ def main():
             if not text:
                 continue
 
+            url = reconstruct_url(filename)
             out_path = os.path.join(business_out_dir, filename.replace(".html", ".txt"))
             with open(out_path, "w", encoding="utf-8") as f:
-                f.write(text)
+                f.write(f"URL: {url}\n\n{text}")
             total_pages += 1
 
         print(f"  {domain}: {len(filenames)} pages")
